@@ -1,0 +1,17 @@
+# Archivos compilados
+*.o
+*.exe
+analizador
+
+# Archivos de salida
+output.txt
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Directorio de Claude Code
+.claude/
+
+# PDF de teoria
+*.pdf
