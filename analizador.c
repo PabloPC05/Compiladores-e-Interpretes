@@ -264,6 +264,19 @@ static int analizarIdentificador(int c, char *lexema) {
     /* Leer mientras sea alfanumerico o guion bajo */
     int sig = verSiguiente();
     while (isalnum(sig) || sig == '_') {
+        /* Error si el identificador supera la longitud maxima permitida.
+         * Identificadores mas largos que MAX_LONGITUD_ID podrian abarcar
+         * mas de un bloque del doble buffer, causando errores de lectura. */
+        if (i >= MAX_LONGITUD_ID - 1) {
+            lexema[i] = '\0';
+            reportarErrorLexico(lineaActual, columnaActual,
+                "Identificador supera la longitud maxima permitida");
+            /* Consumir el resto del identificador para no desincronizar */
+            while (isalnum(verSiguiente()) || verSiguiente() == '_') {
+                siguienteCaracter();
+            }
+            return ERROR_LEXICO;
+        }
         lexema[i++] = siguienteCaracter();
         sig = verSiguiente();
     }
@@ -355,6 +368,9 @@ int siguienteComponenteLexico(char *lexema) {
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             continue;
         }
+
+        /* Marcar el inicio del lexema actual en el doble buffer */
+        moverInicio();
 
         /*
          * Comentarios y operador division.

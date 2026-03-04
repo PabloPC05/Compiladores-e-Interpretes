@@ -5,10 +5,10 @@
  * definiciones.h
  *
  * Archivo de cabecera principal del analizador lexico.
- * Contiene las definiciones de tokens, estructuras de datos
+ * Contiene las definiciones de tokens, constantes globales
  * y prototipos de funciones utilizados por todos los modulos.
  *
- * Los codigos numericos de los tokens se dividen en rangos:
+ * Rangos de codigos de tokens:
  *   - 273-299: Palabras reservadas del lenguaje D
  *   - 300-349: Operadores y signos de puntuacion
  *   - 350-399: Literales (numeros, cadenas, identificadores)
@@ -20,33 +20,59 @@
 #include <string.h>
 #include <ctype.h>
 
-/* Capacidad inicial de la tabla de simbolos (se redimensiona dinamicamente) */
-#define CAPACIDAD_INICIAL 64
-
-/* Longitud maxima de un lexema individual */
+/* ============================================================
+ * Constantes del sistema de entrada (doble buffer)
+ *
+ * TAM_BLOQUE: tamano de cada mitad del doble buffer.
+ *   El valor ideal es el total de caracteres del fichero fuente,
+ *   pero 1024 es un buen punto de partida para pruebas.
+ *   Cambiar este valor permite probar distintos escenarios.
+ *
+ * MAX_LONGITUD_ID: longitud maxima permitida para un identificador.
+ *   Debe ser <= TAM_BLOQUE para evitar que un identificador abarque
+ *   mas de un bloque (lo que causaria un error de lectura).
+ *
+ * MAX_LONGITUD_LEXEMA: tamano del buffer de lexema en el analizador.
+ *   Cubre cadenas y numeros que pueden ser mas largos que un ID.
+ * ============================================================ */
+#define TAM_BLOQUE        1024
+#define MAX_LONGITUD_ID   64
 #define MAX_LONGITUD_LEXEMA 256
 
-/* Longitud maxima de una linea de entrada */
-#define MAX_LONGITUD_LINEA 1024
-
 /* ============================================================
- * Codigos de palabras reservadas del lenguaje D
- * Cada palabra reservada tiene un codigo unico que permite
- * al analizador sintactico distinguirlas de los identificadores.
+ * Constante de la tabla hash (tabla_simbolos.c / TS.c)
+ *
+ * TAM_HASH: numero de slots de la tabla. Debe ser primo y
+ * al menos el doble del numero esperado de simbolos para
+ * mantener un factor de carga bajo (< 50%).
+ * Con ~50 simbolos en regression.d, 509 es mas que suficiente.
  * ============================================================ */
-#define IMPORT  273
-#define WHILE   274
-#define DOUBLE  275
-#define INT     276
-#define VOID    277
-#define FOREACH 278
-#define CAST    279
-#define RETURN  280
+#define TAM_HASH 509
 
 /* ============================================================
- * Codigos de operadores y signos de puntuacion
- * Para caracteres ASCII simples se podria usar su valor ASCII,
- * pero se asignan codigos propios para mayor claridad.
+ * Codigos de palabras reservadas del lenguaje D (273-299)
+ * ============================================================ */
+#define IMPORT    273
+#define WHILE     274
+#define DOUBLE    275
+#define INT       276
+#define VOID      277
+#define FOREACH   278
+#define CAST      279
+#define RETURN    280
+#define ENFORCE   281
+#define IF        282
+#define ELSE      283
+#define FOR       284
+#define DO        285
+#define BREAK     286
+#define CONTINUE  287
+#define SWITCH    288
+#define CASE      289
+#define DEFAULT   290
+
+/* ============================================================
+ * Codigos de operadores y signos de puntuacion (300-349)
  * ============================================================ */
 #define PUNTO_Y_COMA    300
 #define PARENTESIS_IZQ  301
@@ -63,12 +89,25 @@
 #define MULTIPLICACION  312
 #define DIVISION        313
 #define IGUAL           315
+#define DISTINTO        316
 #define MENOR           317
+#define MENOR_IGUAL     318
+#define MAYOR           319
+#define MAYOR_IGUAL     320
+#define AND_LOGICO      321
+#define OR_LOGICO       322
+#define NEGACION        323
 #define SUMA_ASIGNACION 330
+#define RESTA_ASIGNACION 331
+#define MULT_ASIGNACION 332
+#define DIV_ASIGNACION  333
 #define INCREMENTO      340
+#define DECREMENTO      341
+#define DOS_PUNTOS      342
+#define INTERROGACION   343
 
 /* ============================================================
- * Codigos de literales
+ * Codigos de literales (350-399)
  * ============================================================ */
 #define NUMERO          350
 #define NUMERO_DECIMAL  351
@@ -76,95 +115,53 @@
 #define CADENA          353
 
 /* ============================================================
- * Tokens especiales
+ * Tokens especiales (400+)
  * ============================================================ */
 #define FIN_DE_FICHERO  400
 #define ERROR_LEXICO    401
 
 /* ============================================================
- * Estructuras de datos para la tabla de simbolos
- *
- * Se usa memoria dinamica (malloc/realloc/free) para cumplir
- * con el requisito de no usar estructuras estaticas.
- * La tabla crece automaticamente cuando se llena.
+ * Variables globales de posicion (definidas en sistema_entrada.c)
  * ============================================================ */
-
-/*
- * EntradaSimbolo: representa una entrada individual en la tabla.
- * - lexema: cadena dinamica con el texto del token
- * - componente: codigo numerico del tipo de token
- * - linea/columna: posicion en el fichero fuente (para depuracion)
- */
-typedef struct {
-    char *lexema;       /* Cadena dinamica (malloc) */
-    int componente;     /* Codigo numerico del token */
-    int linea;          /* Linea donde aparecio por primera vez */
-    int columna;        /* Columna donde aparecio por primera vez */
-} EntradaSimbolo;
-
-/*
- * TablaSimbolos: estructura principal que almacena todas las entradas.
- * - entradas: array dinamico de EntradaSimbolo (crece con realloc)
- * - cantidad: numero actual de entradas
- * - capacidad: tamano actual del array (se duplica al llenarse)
- */
-typedef struct {
-    EntradaSimbolo *entradas;   /* Array dinamico (malloc/realloc) */
-    int cantidad;               /* Numero de entradas actuales */
-    int capacidad;              /* Capacidad actual del array */
-} TablaSimbolos;
-
-/* ============================================================
- * Variables globales
- * ============================================================ */
-extern TablaSimbolos tablaSimbolos;
-extern int lineaActual;
-extern int columnaActual;
+extern int   lineaActual;
+extern int   columnaActual;
 extern FILE *archivoFuente;
 
 /* ============================================================
  * Prototipos - Sistema de entrada (sistema_entrada.c)
  *
- * El sistema de entrada abstrae la lectura del fichero fuente,
- * proporcionando caracteres uno a uno y manteniendo la posicion
- * (linea y columna) actualizada.
+ * Implementa el doble buffer con centinela y los punteros
+ * inicio/delantero para una lectura eficiente del fichero fuente.
  * ============================================================ */
 int  abrirArchivoFuente(const char *nombreFichero);
 void cerrarArchivoFuente(void);
 int  siguienteCaracter(void);
 void devolverCaracter(int c);
+void moverInicio(void);
 
 /* ============================================================
- * Prototipos - Tabla de simbolos (tabla_simbolos.c)
+ * Prototipos - Tabla de simbolos (tabla_simbolos.c / TS.c)
  *
- * La tabla de simbolos almacena palabras reservadas (pre-cargadas
- * al inicio) e identificadores (insertados durante el analisis).
- * Permite distinguir entre ambos tipos de lexemas.
+ * Tabla hash con direccionamiento abierto (sondeo lineal).
+ * Almacena palabras reservadas (pre-cargadas) e identificadores.
  * ============================================================ */
-void inicializarTablaSimbolos(void);
-void liberarTablaSimbolos(void);
-int  buscarSimbolo(const char *lexema);
-int  insertarSimbolo(const char *lexema, int componente, int linea, int columna);
-int  obtenerComponente(int indice);
+void        inicializarTablaSimbolos(void);
+void        liberarTablaSimbolos(void);
+int         buscarSimbolo(const char *lexema);
+int         insertarSimbolo(const char *lexema, int componente, int linea, int columna);
+int         obtenerComponente(int indice);
 const char *obtenerLexema(int indice);
-void imprimirTablaSimbolos(void);
-void imprimirPalabrasReservadas(void);
-void imprimirIdentificadores(void);
+void        imprimirTablaSimbolos(void);
+void        imprimirPalabrasReservadas(void);
+void        imprimirIdentificadores(void);
 
 /* ============================================================
  * Prototipos - Analizador lexico (analizador.c)
- *
- * El analizador lexico es el productor: el analizador sintactico
- * (consumidor) llama a siguienteComponenteLexico() repetidamente
- * hasta recibir FIN_DE_FICHERO.
  * ============================================================ */
 int siguienteComponenteLexico(char *lexema);
 
 /* ============================================================
  * Prototipos - Gestor de errores (errores.c)
- *
- * Centraliza el manejo de errores lexicos y advertencias,
- * manteniendo contadores para el resumen final.
  * ============================================================ */
 void reportarErrorLexico(int linea, int columna, const char *mensaje);
 void reportarAdvertencia(int linea, int columna, const char *mensaje);
