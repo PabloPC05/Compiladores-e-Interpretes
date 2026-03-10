@@ -148,7 +148,7 @@ void moverInicio(void);
 void        inicializarTablaSimbolos(void);
 void        liberarTablaSimbolos(void);
 int         buscarSimbolo(const char *lexema);
-int         insertarSimbolo(const char *lexema, int componente, int linea, int columna);
+int         insertarSimbolo(const char *lexema, int componente);
 int         obtenerComponente(int indice);
 const char *obtenerLexema(int indice);
 void        imprimirTablaSimbolos(void);

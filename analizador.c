@@ -289,7 +289,7 @@ static int analizarIdentificador(int c, char *lexema) {
     }
 
     /* Identificador nuevo: insertar en la tabla */
-    insertarSimbolo(lexema, IDENTIFICADOR, lineaActual, columnaActual);
+    insertarSimbolo(lexema, IDENTIFICADOR);
     return IDENTIFICADOR;
 }
 
