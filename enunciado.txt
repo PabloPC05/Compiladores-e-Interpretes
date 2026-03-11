@@ -1,5 +1,3 @@
-
-
 Práctica 1
 
 Construir un analizador léxico que devuelva los componentes léxicos que aparecen en el programa regression.d, codificado en el lenguaje de programación D.
