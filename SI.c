@@ -13,9 +13,9 @@ typedef struct {
     int   inicio;
     int   bloque_inicio;
     FILE *fichero;
-} EstadoSI;
+} SistemaEntrada;
 
-static EstadoSI si = { .fichero = NULL };
+static SistemaEntrada si = { .fichero = NULL };
 
 static void cargar_bloque(int b) {
     int leidos = (int)fread(si.buf[b], sizeof(char), TAM_BUFFER, si.fichero);

@@ -11,21 +11,25 @@
 
 #define MAX_LONGITUD_ID TAM_BUFFER
 
-static int linea_actual   = 1;
-static int columna_actual = 1;
+typedef struct {
+    int linea;
+    int columna;
+} AnalizadorLexico;
+
+static AnalizadorLexico al = { .linea = 1, .columna = 1 };
 
 static inline char leer_char(void) {
     char c = sig_caracter();
     if (c == '\n') { 
-        linea_actual++; 
-        columna_actual = 1; 
-    } else { columna_actual++; }
+        al.linea++; 
+        al.columna = 1; 
+    } else { al.columna++; }
     return c;
 }
 
 static inline void devolver_char(void) {
     devolver_caracter();
-    if (columna_actual > 1) columna_actual--;
+    if (al.columna > 1) al.columna--;
 }
 
 static inline int match(char esperado) {
@@ -51,7 +55,7 @@ static void saltar_comentario_bloque(void) {
     do {
         c = leer_char();
         if (c == (char)EOF) {
-            report(ERR_EOF_COMENTARIO_BLQ, linea_actual, columna_actual, 0);
+            report(ERR_EOF_COMENTARIO_BLQ, al.linea, al.columna, 0);
             return;
         }
         if (prev == '*' && c == '/') return;
@@ -66,7 +70,7 @@ static void saltar_comentario_anidado(void) {
     while (depth > 0) {
         c = leer_char();
         if (c == (char)EOF) {
-            report(ERR_EOF_COMENTARIO_ANID, linea_actual, columna_actual, 0);
+            report(ERR_EOF_COMENTARIO_ANID, al.linea, al.columna, 0);
             return;
         }
         if (prev == '/' && c == '+') { depth++; c = 0; }
@@ -105,7 +109,7 @@ static void saltar_espacios_y_comentarios(void) {
 
 static ComponenteLexico leer_identificador(void) {
     int longitud = 1;
-    int col_inicio = columna_actual - 1;
+    int col_inicio = al.columna - 1;
 
     char c = leer_char();
     while (isalnum((unsigned char)c) || c == '_') {
@@ -115,7 +119,7 @@ static ComponenteLexico leer_identificador(void) {
     devolver_char();
 
     if (longitud > MAX_LONGITUD_ID) {
-        report(ERR_ID_DEMASIADO_LARGO, linea_actual, col_inicio, 0);
+        report(ERR_ID_DEMASIADO_LARGO, al.linea, col_inicio, 0);
     }
 
     char *lex = get_lexema();
@@ -238,7 +242,7 @@ static ComponenteLexico leer_string(void) {
         if (c == '\\') {
             char esc = leer_char();
             if (esc != 'n' && esc != 't' && esc != 'r' && esc != '\\' && esc != '"') {
-                report(ERR_ESCAPE_DESCONOCIDO, linea_actual, columna_actual, 0);
+                report(ERR_ESCAPE_DESCONOCIDO, al.linea, al.columna, 0);
             }
         }
         c = leer_char();
@@ -287,7 +291,7 @@ static ComponenteLexico procesar_operador_o_delimitador(char c) {
         return make_cl(c, get_lexema());
 
     default:
-        report(ERR_CARACTER_NO_RECONOC, linea_actual, columna_actual, 0);
+        report(ERR_CARACTER_NO_RECONOC, al.linea, al.columna, 0);
         return make_cl(TOKEN_ERROR, get_lexema());
     }
 }

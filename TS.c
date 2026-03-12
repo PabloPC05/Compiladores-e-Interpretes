@@ -6,7 +6,8 @@
 #include "definiciones.h"
 #include "errores.h"
 
-#define TAM_TS 101
+#define TAM_TS_INICIAL  101
+#define FACTOR_CARGA_MAX 70  
 
 static inline char *copiar_lexema(const char *src) {
     char *copia = malloc(strlen(src) + 1);
@@ -22,18 +23,60 @@ static inline unsigned int hash_djb2(const char *str) {
     return (unsigned int)h;
 }
 
-static ComponenteLexico *tabla = NULL;
+typedef struct {
+    ComponenteLexico *tabla;
+    int tam_actual;
+    int num_entradas;
+} TablaSimbolos;
+
+static TablaSimbolos ts = { .tabla = NULL, .tam_actual = 0, .num_entradas = 0 };
+
+
+/* Redimensiona la tabla al doble de su tamaño actual */
+static void redimensionar_TS(void) {
+    int nuevo_tam = ts.tam_actual * 2 + 1;
+
+    /* Reservar nueva tabla e inicializarla */
+    ComponenteLexico *nueva = malloc(nuevo_tam * sizeof(ComponenteLexico));
+    if (!nueva) report(ERR_MEMORIA_INSUFICIENTE, 0, 0, 1);
+
+    for (int i = 0; i < nuevo_tam; i++) {
+        nueva[i].lexema = NULL;
+        nueva[i].token  = TOKEN_INVALIDO;
+    }
+
+    /* Reinsertar cada entrada en la nueva tabla recalculando posiciones */
+    for (int i = 0; i < ts.tam_actual; i++) {
+        if (ts.tabla[i].lexema == NULL) continue;
+
+        unsigned int pos = hash_djb2(ts.tabla[i].lexema) % nuevo_tam;
+        while (nueva[pos].lexema != NULL)
+            pos = (pos + 1) % nuevo_tam;
+
+        /* Mover el puntero al lexema, no copiarlo */
+        nueva[pos].lexema = ts.tabla[i].lexema;
+        nueva[pos].token  = ts.tabla[i].token;
+    }
+
+    /* Liberar el array viejo (no los lexemas) y actualizar */
+    free(ts.tabla);
+    ts.tabla = nueva;
+    ts.tam_actual = nuevo_tam;
+}
 
 
 void inicializar_TS(void) {
-    tabla = malloc(TAM_TS * sizeof(ComponenteLexico));
-    if (!tabla) {
+    ts.tam_actual = TAM_TS_INICIAL;
+    ts.num_entradas = 0;
+
+    ts.tabla = malloc(ts.tam_actual * sizeof(ComponenteLexico));
+    if (!ts.tabla) {
         report(ERR_MEMORIA_INSUFICIENTE, 0, 0, 1);
     }
 
-    for (int i = 0; i < TAM_TS; i++) {
-        tabla[i].lexema = NULL;
-        tabla[i].token  = TOKEN_INVALIDO;
+    for (int i = 0; i < ts.tam_actual; i++) {
+        ts.tabla[i].lexema = NULL;
+        ts.tabla[i].token  = TOKEN_INVALIDO;
     }
 
     /* Palabras reservadas presentes en regression.d */
@@ -45,7 +88,7 @@ void inicializar_TS(void) {
     buscar_o_insertar_TS("foreach",  KW_FOREACH);
     buscar_o_insertar_TS("cast",     KW_CAST);
     buscar_o_insertar_TS("enforce",  KW_ENFORCE);
-    buscar_o_insertar_TS("return",   KW_RETURN); 
+    buscar_o_insertar_TS("return",   KW_RETURN);
     buscar_o_insertar_TS("if",       KW_IF);
     buscar_o_insertar_TS("else",     KW_ELSE);
     buscar_o_insertar_TS("for",      KW_FOR);
@@ -55,23 +98,19 @@ void inicializar_TS(void) {
     buscar_o_insertar_TS("switch",   KW_SWITCH);
     buscar_o_insertar_TS("case",     KW_CASE);
     buscar_o_insertar_TS("default",  KW_DEFAULT);
-
-    printf("=== Palabras reservadas cargadas en la tabla de simbolos ===\n");
-    imprimir_TS();
-    printf("============================================================\n\n");
 }
 
 
 static inline int buscar_posicion(const char *lexema, unsigned int h) {
-    unsigned int pos = h % TAM_TS;
+    unsigned int pos = h % ts.tam_actual;
 
-    for (int i = 0; i < TAM_TS; i++) {
-        unsigned int p = (pos + i) % TAM_TS;
+    for (int i = 0; i < ts.tam_actual; i++) {
+        unsigned int p = (pos + i) % ts.tam_actual;
 
-        if (tabla[p].lexema == NULL)
+        if (ts.tabla[p].lexema == NULL)
             return p;
 
-        if (strcmp(tabla[p].lexema, lexema) == 0)
+        if (strcmp(ts.tabla[p].lexema, lexema) == 0)
             return p;
     }
 
@@ -80,47 +119,54 @@ static inline int buscar_posicion(const char *lexema, unsigned int h) {
 
 
 ComponenteLexico buscar_o_insertar_TS(const char *lexema, int token_nuevo) {
+    /* Si el factor de carga supera el 70%, redimensionar antes de insertar */
+    if (ts.num_entradas * 100 / ts.tam_actual > FACTOR_CARGA_MAX)
+        redimensionar_TS();
+
     unsigned int h = hash_djb2(lexema);
     int pos = buscar_posicion(lexema, h);
 
-    // Si la tabla está llena, no se puede insertar ni buscar
+    // Si la tabla está llena (no debería ocurrir tras redimensionar)
     if (pos == -1) {
-        report(ERR_TS_LLENA, 0, 0, 0);
+        report(ERR_TS_LLENA, 0, 0, 1);
         return make_cl(TOKEN_INVALIDO, NULL);
     }
 
-    // Si el lexema ya existe en la tabla, devolvemos su lexema
-    if (tabla[pos].lexema != NULL)
-        return tabla[pos];
+    // Si el lexema ya existe en la tabla, devolvemos su componente léxico
+    if (ts.tabla[pos].lexema != NULL)
+        return ts.tabla[pos];
 
-    // Si el lexema no existe, lo insertamos con el token dado y devolvemos el nuevo componente léxico
-    tabla[pos].lexema = copiar_lexema(lexema); // Diferente puntero aunque el contenido sea el mismo
-    if (!tabla[pos].lexema) {
+    // Si el lexema no existe, lo insertamos con el token dado
+    ts.tabla[pos].lexema = copiar_lexema(lexema);
+    if (!ts.tabla[pos].lexema) {
         report(ERR_MEMORIA_INSUFICIENTE, 0, 0, 1);
     }
-    
-    tabla[pos].token = token_nuevo;
-    return tabla[pos];
+    ts.tabla[pos].token = token_nuevo;
+    ts.num_entradas++;
+
+    return ts.tabla[pos];
 }
 
 
 void imprimir_TS(void) {
     printf("=== Tabla de simbolos ===\n");
-    for (int i = 0; i < TAM_TS; i++) {
-        if (tabla[i].lexema != NULL)
-            printf("  [%3d] token=%-4d  lexema=%s\n", i, tabla[i].token, tabla[i].lexema);
+    for (int i = 0; i < ts.tam_actual; i++) {
+        if (ts.tabla[i].lexema != NULL)
+            printf("  [%3d] token=%-4d  lexema=%s\n", i, ts.tabla[i].token, ts.tabla[i].lexema);
     }
     printf("=========================\n\n");
 }
 
 
 void liberar_TS(void) {
-    for (int i = 0; i < TAM_TS; i++) {
-        if (tabla[i].lexema != NULL) {
-            free(tabla[i].lexema);
-            tabla[i].lexema = NULL;
+    for (int i = 0; i < ts.tam_actual; i++) {
+        if (ts.tabla[i].lexema != NULL) {
+            free(ts.tabla[i].lexema);
+            ts.tabla[i].lexema = NULL;
         }
     }
-    free(tabla);
-    tabla = NULL;
+    free(ts.tabla);
+    ts.tabla = NULL;
+    ts.tam_actual = 0;
+    ts.num_entradas = 0;
 }
