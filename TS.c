@@ -4,64 +4,57 @@
 
 #include "TS.h"
 #include "definiciones.h"
+#include "errores.h"
 
 #define TAM_TS 101
 
-static char *copiar_lexema(const char *src) {
+static inline char *copiar_lexema(const char *src) {
     char *copia = malloc(strlen(src) + 1);
     if (copia) strcpy(copia, src);
     return copia;
 }
 
 /* Hash djb2: h = h*33 + c. Devuelve el hash crudo (sin modulo) */
-static unsigned int hash_djb2(const char *str) {
+static inline unsigned int hash_djb2(const char *str) {
     unsigned long h = 5381;
     while (*str)
         h = h * 33 + (unsigned char)*str++;
     return (unsigned int)h;
 }
 
-typedef struct {
-    char         *lexema;
-    unsigned int  hash;   // hash crudo, cache para evitar strcmp innecesarios
-    int           token;
-} EntradaTS;
-
-static EntradaTS *tabla = NULL;
+static ComponenteLexico *tabla = NULL;
 
 
 void inicializar_TS(void) {
-    tabla = malloc(TAM_TS * sizeof(EntradaTS));
+    tabla = malloc(TAM_TS * sizeof(ComponenteLexico));
     if (!tabla) {
-        fprintf(stderr, "Error: memoria insuficiente para la tabla de simbolos\n");
-        exit(1);
+        report(ERR_MEMORIA_INSUFICIENTE, 0, 0, 1);
     }
 
     for (int i = 0; i < TAM_TS; i++) {
         tabla[i].lexema = NULL;
-        tabla[i].hash   = 0;
         tabla[i].token  = TOKEN_INVALIDO;
     }
 
     /* Palabras reservadas presentes en regression.d */
-    insertar_TS("import",   KW_IMPORT);
-    insertar_TS("while",    KW_WHILE);
-    insertar_TS("double",   KW_DOUBLE);
-    insertar_TS("int",      KW_INT);
-    insertar_TS("void",     KW_VOID);
-    insertar_TS("foreach",  KW_FOREACH);
-    insertar_TS("cast",     KW_CAST);
-    insertar_TS("enforce",  KW_ENFORCE);
-    insertar_TS("return",   KW_RETURN);
-    insertar_TS("if",       KW_IF);
-    insertar_TS("else",     KW_ELSE);
-    insertar_TS("for",      KW_FOR);
-    insertar_TS("do",       KW_DO);
-    insertar_TS("break",    KW_BREAK);
-    insertar_TS("continue", KW_CONTINUE);
-    insertar_TS("switch",   KW_SWITCH);
-    insertar_TS("case",     KW_CASE);
-    insertar_TS("default",  KW_DEFAULT);
+    buscar_o_insertar_TS("import",   KW_IMPORT);
+    buscar_o_insertar_TS("while",    KW_WHILE);
+    buscar_o_insertar_TS("double",   KW_DOUBLE);
+    buscar_o_insertar_TS("int",      KW_INT);
+    buscar_o_insertar_TS("void",     KW_VOID);
+    buscar_o_insertar_TS("foreach",  KW_FOREACH);
+    buscar_o_insertar_TS("cast",     KW_CAST);
+    buscar_o_insertar_TS("enforce",  KW_ENFORCE);
+    buscar_o_insertar_TS("return",   KW_RETURN); 
+    buscar_o_insertar_TS("if",       KW_IF);
+    buscar_o_insertar_TS("else",     KW_ELSE);
+    buscar_o_insertar_TS("for",      KW_FOR);
+    buscar_o_insertar_TS("do",       KW_DO);
+    buscar_o_insertar_TS("break",    KW_BREAK);
+    buscar_o_insertar_TS("continue", KW_CONTINUE);
+    buscar_o_insertar_TS("switch",   KW_SWITCH);
+    buscar_o_insertar_TS("case",     KW_CASE);
+    buscar_o_insertar_TS("default",  KW_DEFAULT);
 
     printf("=== Palabras reservadas cargadas en la tabla de simbolos ===\n");
     imprimir_TS();
@@ -69,15 +62,7 @@ void inicializar_TS(void) {
 }
 
 
-/*
- * Busca la posicion de un lexema en la tabla.
- * Recibe el hash crudo (sin modulo) para compararlo con la cache de cada
- * entrada antes de recurrir a strcmp. En una tabla pequena (101 posiciones)
- * las colisiones son frecuentes, y comparar dos enteros es mucho mas rapido
- * que comparar cadenas caracter a caracter. Solo cuando los hashes coinciden
- * se confirma con strcmp para descartar colisiones de hash.
- */
-static int buscar_posicion(const char *lexema, unsigned int h) {
+static inline int buscar_posicion(const char *lexema, unsigned int h) {
     unsigned int pos = h % TAM_TS;
 
     for (int i = 0; i < TAM_TS; i++) {
@@ -86,65 +71,36 @@ static int buscar_posicion(const char *lexema, unsigned int h) {
         if (tabla[p].lexema == NULL)
             return p;
 
-        if (tabla[p].hash == h && strcmp(tabla[p].lexema, lexema) == 0)
+        if (strcmp(tabla[p].lexema, lexema) == 0)
             return p;
     }
 
     return -1; // tabla llena
 }
 
-/* int buscar_TS(const char *lexema) {
+
+ComponenteLexico buscar_o_insertar_TS(const char *lexema, int token_nuevo) {
     unsigned int h = hash_djb2(lexema);
     int pos = buscar_posicion(lexema, h);
-    if (pos == -1 || tabla[pos].lexema == NULL)
-        return TOKEN_INVALIDO;
-    return tabla[pos].token;
-} */
 
-
-void insertar_TS(const char *lexema, int token) {
-    unsigned int h = hash_djb2(lexema);
-    int pos = buscar_posicion(lexema, h);
+    // Si la tabla está llena, no se puede insertar ni buscar
     if (pos == -1) {
-        fprintf(stderr, "Error: tabla de simbolos llena, no se puede insertar '%s'\n", lexema);
-        return;
+        report(ERR_TS_LLENA, 0, 0, 0);
+        return make_cl(TOKEN_INVALIDO, NULL);
     }
 
-    if (tabla[pos].lexema != NULL) {
-        return;
-    }
-
-    tabla[pos].lexema = copiar_lexema(lexema);
-    if (!tabla[pos].lexema) {
-        fprintf(stderr, "Error: memoria insuficiente en insertar_TS\n");
-        exit(1);
-    }
-    tabla[pos].hash  = h;
-    tabla[pos].token = token;
-
-}
-
-
-int buscar_o_insertar_TS(const char *lexema, int token_nuevo) {
-    unsigned int h = hash_djb2(lexema);
-    int pos = buscar_posicion(lexema, h);
-
-    if (pos == -1) {
-        fprintf(stderr, "Error: tabla de simbolos llena, no se puede insertar '%s'\n", lexema);
-        return token_nuevo;
-    }
-
+    // Si el lexema ya existe en la tabla, devolvemos su lexema
     if (tabla[pos].lexema != NULL)
-        return tabla[pos].token;
+        return tabla[pos];
 
-    tabla[pos].lexema = copiar_lexema(lexema);
+    // Si el lexema no existe, lo insertamos con el token dado y devolvemos el nuevo componente léxico
+    tabla[pos].lexema = copiar_lexema(lexema); // Diferente puntero aunque el contenido sea el mismo
     if (!tabla[pos].lexema) {
-        fprintf(stderr, "Error: memoria insuficiente en buscar_o_insertar_TS\n");
-        exit(1);
+        report(ERR_MEMORIA_INSUFICIENTE, 0, 0, 1);
     }
-    tabla[pos].hash  = h;
+    
     tabla[pos].token = token_nuevo;
-    return token_nuevo;
+    return tabla[pos];
 }
 
 

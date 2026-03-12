@@ -3,8 +3,7 @@
 
 #include "definiciones.h"
 #include "TS.h"
-#include "SI.h"
-#include "AL.h"
+#include "AS.h"
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -12,27 +11,23 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Inicializacion
+    // Inicializacion de la tabla de simbolos e impresion con palabras reservadas
     inicializar_TS();
-    inicializar_SI(argv[1]);
+    printf("=== Tabla de simbolos inicial (palabras reservadas) ===\n");
+    imprimir_TS();
+    printf("\n");
 
-    // Analisis lexico
-    ComponenteLexico cl;
-    int num_componentes = 0;
+    // Inicializacion y ejecucion del analizador sintactico
+    inicializar_AS(argv[1]);
+    printf("=== Analisis ===\n");
+    analizar();
+    printf("\n");
 
-    do {
-        cl = sig_comp_lexico();
-        printf("<%-4d, %s>\n", cl.token, cl.lexema);
-        num_componentes++;
-        free(cl.lexema);
-    } while (cl.token != TOKEN_EOF);
-
-    printf("\nTotal de componentes lexicos: %d\n\n", num_componentes);
-
-    // Finalizacion 
+    // Impresion final de la tabla de simbolos y limpieza
+    printf("=== Tabla de simbolos final ===\n");
     imprimir_TS();
     liberar_TS();
-    cerrar_SI();
+    cerrar_AS();
 
     return 0;
 }

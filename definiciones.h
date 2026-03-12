@@ -60,4 +60,11 @@ typedef struct {
     char *lexema;
 } ComponenteLexico;
 
+static inline ComponenteLexico make_cl(int token, char *lexema){
+    ComponenteLexico cl;
+    cl.token  = token;
+    cl.lexema = lexema;
+    return cl;
+}
+
 #endif /* DEFINICIONES_H */

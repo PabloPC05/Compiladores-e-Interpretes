@@ -14,7 +14,7 @@
 static int linea_actual   = 1;
 static int columna_actual = 1;
 
-static char leer_char(void) {
+static inline char leer_char(void) {
     char c = sig_caracter();
     if (c == '\n') { 
         linea_actual++; 
@@ -23,25 +23,12 @@ static char leer_char(void) {
     return c;
 }
 
-static void devolver_char(void) {
+static inline void devolver_char(void) {
     devolver_caracter();
     if (columna_actual > 1) columna_actual--;
 }
 
-/*static char peek(void) {
-    return peek_caracter();
-}*/
-
-static ComponenteLexico make_cl(int token, char *lexema) {
-    ComponenteLexico cl;
-    cl.token  = token;
-    cl.lexema = lexema;
-    return cl;
-}
-
-static int match(char esperado) {
-    //if (peek() != esperado) return 0;
-    // definimos match sin usar peek() para evitar problemas de sincronización con el buffer
+static inline int match(char esperado) {
     char c = leer_char();
     if (c != esperado) {
         devolver_char();
@@ -52,7 +39,6 @@ static int match(char esperado) {
 
 // Comentario de linea: // ... \n */
 static void saltar_comentario_linea(void) {
-    leer_char(); // consumir segunda '/'
     char c;
     do {
         c = leer_char();
@@ -61,12 +47,11 @@ static void saltar_comentario_linea(void) {
 
 // Comentario de bloque: /* ... */
 static void saltar_comentario_bloque(void) {
-    leer_char(); // consumir '*'
     char c, prev = 0;
     do {
         c = leer_char();
         if (c == (char)EOF) {
-            fprintf(stderr, "Error [%d:%d]: fin de fichero dentro de comentario '/*'\n", linea_actual, columna_actual);
+            report(ERR_EOF_COMENTARIO_BLQ, linea_actual, columna_actual, 0);
             return;
         }
         if (prev == '*' && c == '/') return;
@@ -76,13 +61,12 @@ static void saltar_comentario_bloque(void) {
 
 // Comentario anidado: /+ ... +/ 
 static void saltar_comentario_anidado(void) {
-    leer_char(); // consumir '+'
     int  depth = 1;
     char c, prev = 0;
     while (depth > 0) {
         c = leer_char();
         if (c == (char)EOF) {
-            fprintf(stderr, "Error [%d:%d]: fin de fichero dentro de comentario '/+'\n", linea_actual, columna_actual);
+            report(ERR_EOF_COMENTARIO_ANID, linea_actual, columna_actual, 0);
             return;
         }
         if (prev == '/' && c == '+') { depth++; c = 0; }
@@ -95,7 +79,6 @@ static void saltar_espacios_y_comentarios(void) {
     int saltando_ruido = 1;
 
     while (saltando_ruido) {
-        //char c = peek();
         char c = leer_char();
 
         if (isspace((unsigned char)c)) {
@@ -114,6 +97,7 @@ static void saltar_espacios_y_comentarios(void) {
                 saltando_ruido = 0;
             }
         } else {
+            if (c != (char)EOF) devolver_char();
             saltando_ruido = 0;
         }
     }
@@ -128,34 +112,37 @@ static ComponenteLexico leer_identificador(void) {
         longitud++;
         c = leer_char();
     }
+    devolver_char();
 
     if (longitud > MAX_LONGITUD_ID) {
-        fprintf(stderr, "Aviso [%d:%d]: identificador supera el limite de %d caracteres\n", linea_actual, col_inicio, MAX_LONGITUD_ID);
+        report(ERR_ID_DEMASIADO_LARGO, linea_actual, col_inicio, 0);
     }
 
     char *lex = get_lexema();
-    int token = buscar_o_insertar_TS(lex, IDENTIFICADOR);
-
-    return make_cl(token, lex);
+    ComponenteLexico cl = buscar_o_insertar_TS(lex, IDENTIFICADOR);
+    return make_cl(cl.token, lex);
 }
 
 
 // Consume digitos hexadecimales con separador '_' 
-static void consumir_hex(void) {
+static inline void consumir_hex(void) {
     char c = leer_char();
     while (isxdigit((unsigned char)c) || c == '_') c = leer_char();
+    devolver_char();
 }
 
 // Consume digitos binarios con separador '_' 
-static void consumir_bin(void) {
+static inline void consumir_bin(void) {
     char c = leer_char();
     while (c == '0' || c == '1' || c == '_') c = leer_char();
+    devolver_char();
 }
 
 // Consume digitos decimales con separador '_' 
-static void consumir_dec(void) {
+static inline void consumir_dec(void) {
     char c = leer_char();
     while (isdigit((unsigned char)c) || c == '_') c = leer_char();
+    devolver_char();
 }
 
 
@@ -170,29 +157,36 @@ static void consumir(int (*cond)(int)) {
 
 
 // Intenta leer parte decimal (.digitos). Devuelve 1 si la leyo
-static int leer_parte_decimal(void) {
+static inline int leer_parte_decimal(void) {
     char c = leer_char();
-    if (c != '.') return 0;
+    if (c != '.'){
+        devolver_char();
+        return 0;
+    }
 
+    c = leer_char();
     if (isdigit((unsigned char)c)) {
         consumir_dec();
         return 1;
     }
 
     devolver_char();
+    devolver_char();
     return 0;
 }
 
 // Intenta leer exponente (e/E [+-] digitos). Devuelve 1 si lo leyo
-static int leer_exponente(void) {
+static inline int leer_exponente(void) {
     char c = leer_char();
-    if (c != 'e' && c != 'E') return 0;
+    if (c != 'e' && c != 'E') { devolver_char(); return 0; }
 
+    int devueltos = 1; // contamos la 'e'/'E'
     char sig = leer_char();
+    devueltos++;
 
     if (sig == '+' || sig == '-') {
-        leer_char();
         sig = leer_char();
+        devueltos++;
     }
 
     if (isdigit((unsigned char)sig)) {
@@ -200,10 +194,8 @@ static int leer_exponente(void) {
         return 1;
     }
 
-    // No hay digitos tras 'e': backtrack
-    devolver_char();
-    char p = leer_char();
-    if (p == '+' || p == '-') devolver_char();
+    // No hay digitos tras 'e': backtrack de todo lo consumido
+    for (int i = 0; i < devueltos; i++) devolver_char();
     return 0;
 }
 
@@ -223,10 +215,11 @@ static ComponenteLexico leer_numero(char primero) {
             return make_cl(LIT_ENTERO, get_lexema());
         }
     }
-
+    
+    // Si no es un literal hexadecimal o binario, puede ser decimal o flotante
+    devolver_char();
     //consumir(isdigit);
     consumir_dec();
-
 
     if (leer_parte_decimal()) es_flotante = 1;
     if (leer_exponente()) es_flotante = 1;
@@ -245,8 +238,7 @@ static ComponenteLexico leer_string(void) {
         if (c == '\\') {
             char esc = leer_char();
             if (esc != 'n' && esc != 't' && esc != 'r' && esc != '\\' && esc != '"') {
-                fprintf(stderr, "Aviso [%d:%d]: secuencia de escape desconocida '\\%c'\n",
-                        linea_actual, columna_actual, esc);
+                report(ERR_ESCAPE_DESCONOCIDO, linea_actual, columna_actual, 0);
             }
         }
         c = leer_char();
@@ -295,7 +287,7 @@ static ComponenteLexico procesar_operador_o_delimitador(char c) {
         return make_cl(c, get_lexema());
 
     default:
-        error_lexico(c);
+        report(ERR_CARACTER_NO_RECONOC, linea_actual, columna_actual, 0);
         return make_cl(TOKEN_ERROR, get_lexema());
     }
 }

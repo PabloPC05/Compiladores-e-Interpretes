@@ -4,122 +4,107 @@
 
 #include "SI.h"
 #include "definiciones.h"
+#include "errores.h"
 
-static char buf[2][TAM_BUFFER + 1];
-static int bloque_activo;
-static int delantero;
-static int inicio;
-static int bloque_inicio;
-static FILE *fichero = NULL;
+typedef struct {
+    char  buf[2][TAM_BUFFER + 1];
+    int   bloque_activo;
+    int   delantero;
+    int   inicio;
+    int   bloque_inicio;
+    FILE *fichero;
+} EstadoSI;
+
+static EstadoSI si = { .fichero = NULL };
 
 static void cargar_bloque(int b) {
-    int leidos = (int)fread(buf[b], sizeof(char), TAM_BUFFER, fichero);
-    buf[b][leidos] = EOF;
+    int leidos = (int)fread(si.buf[b], sizeof(char), TAM_BUFFER, si.fichero);
+    si.buf[b][leidos] = EOF;
 }
 
 void inicializar_SI(const char *nombre_fichero) {
-    fichero = fopen(nombre_fichero, "r");
-    if (!fichero) {
-        fprintf(stderr, "Error: no se puede abrir el fichero '%s'\n", nombre_fichero);
-        exit(1);
+    si.fichero = fopen(nombre_fichero, "r");
+    if (!si.fichero) {
+        report(ERR_FICHERO_NO_ABIERTO, 0, 0, 1);
     }
 
-    bloque_activo = 0;
-    bloque_inicio = 0;
-    delantero = 0;
-    inicio = 0;
+    si.bloque_activo = 0;
+    si.bloque_inicio = 0;
+    si.delantero = 0;
+    si.inicio = 0;
 
     cargar_bloque(0);
 }
 
 char sig_caracter(void) {
-    char c = buf[bloque_activo][delantero];
+    char c = si.buf[si.bloque_activo][si.delantero];
 
     if (c != (char)EOF) {
-        delantero++;
+        si.delantero++;
         return c;
     }
 
-    if (feof(fichero))
+    if (feof(si.fichero))
         return (char)EOF;
 
     // Fin de bloque: cargar el siguiente
-    bloque_activo = 1 - bloque_activo;
-    cargar_bloque(bloque_activo);
-    delantero = 0;
+    si.bloque_activo = 1 - si.bloque_activo;
+    cargar_bloque(si.bloque_activo);
+    si.delantero = 0;
 
-    c = buf[bloque_activo][delantero];
+    c = si.buf[si.bloque_activo][si.delantero];
     if (c == (char)EOF)
         return (char)EOF;
 
-    delantero++;
+    si.delantero++;
     return c;
 }
 
-/*char peek_caracter(void) {
-    char c = buf[bloque_activo][delantero];
-
-    if (c != (char)EOF)
-        return c;
-
-    if (feof(fichero))
-        return (char)EOF;
-
-    // Cuando llegamos al final del bloque cargamos el siguiente
-    bloque_activo = 1 - bloque_activo;
-    cargar_bloque(bloque_activo);
-    delantero = 0;
-
-    return buf[bloque_activo][delantero];
-}*/
-
 void devolver_caracter(void) {
-    if (delantero > 0) {
-        delantero--;
+    if (si.delantero > 0) {
+        si.delantero--;
     } else { // Hay que volver al bloque anterior
-        bloque_activo = 1 - bloque_activo;
-        delantero = TAM_BUFFER - 1;
+        si.bloque_activo = 1 - si.bloque_activo;
+        si.delantero = TAM_BUFFER - 1;
     }
 }
 
+// Devuelve el lexema de los buffers entre inicio y delantero 
 char *get_lexema(void) {
-    int longitud;
+    // Calculamos la longitud del lexema a copiar, teniendo en cuenta que el buffer es circular
+    // Para ello contamos con que puede tener dos partes: 
+    // Parte 1: desde inicio hasta el final del bloque_inicio: TAM_BUFFER - inicio
+    // Parte 2: desde el inicio del bloque_activo hasta delantero: delantero
+    int longitud = si.bloque_activo == si.bloque_inicio
+                    ? si.delantero - si.inicio
+                    : (TAM_BUFFER - si.inicio) + si.delantero;
 
-    if (bloque_inicio == bloque_activo) {
-        longitud = delantero - inicio;
-        char *lexema = malloc(longitud + 1);
-        if (!lexema) {
-            fprintf(stderr, "Error: memoria insuficiente en get_lexema\n");
-            exit(1);
-        }
-        strncpy(lexema, buf[bloque_inicio] + inicio, longitud);
-        lexema[longitud] = '\0';
-        return lexema;
-
-    } else { // El lexema cruza la frontera entre bloques 
-        int parte1 = TAM_BUFFER - inicio;
-        int parte2 = delantero;
-        longitud = parte1 + parte2;
-        char *lexema = malloc(longitud + 1);
-        if (!lexema) {
-            fprintf(stderr, "Error: memoria insuficiente en get_lexema\n");
-            exit(1);
-        }
-        strncpy(lexema, buf[bloque_inicio] + inicio, parte1);
-        strncpy(lexema + parte1, buf[bloque_activo], parte2);
-        lexema[longitud] = '\0';
-        return lexema;
+    // Reservamos el especio en memorria necesario para guardar el lexema
+    char *lexema = malloc(longitud + 1);
+    if (!lexema) {
+        report(ERR_MEMORIA_INSUFICIENTE, 0, 0, 1);
     }
+
+    // Copiamos los datos del buffer al puntero char del lexema
+    if (si.bloque_inicio == si.bloque_activo) {
+        memcpy(lexema, si.buf[si.bloque_inicio] + si.inicio, longitud);
+    } else {
+        memcpy(lexema, si.buf[si.bloque_inicio] + si.inicio, TAM_BUFFER - si.inicio);
+        memcpy(lexema + (TAM_BUFFER - si.inicio), si.buf[si.bloque_activo], si.delantero);
+    }
+
+    lexema[longitud] = '\0'; // Aseguramos que el lexema es una cadena de caracteres válida
+    return lexema;
 }
 
 void mover_inicio(void) {
-    bloque_inicio = bloque_activo;
-    inicio = delantero;
+    si.bloque_inicio = si.bloque_activo;
+    si.inicio = si.delantero;
 }
 
 void cerrar_SI(void) {
-    if (fichero) {
-        fclose(fichero);
-        fichero = NULL;
+    if (si.fichero) {
+        fclose(si.fichero);
+        si.fichero = NULL;
     }
 }
