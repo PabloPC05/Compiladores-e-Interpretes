@@ -1,15 +1,12 @@
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "definiciones.h"
 #include "TS.h"
 #include "AS.h"
+#include "errores.h"
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Uso: %s <fichero.d>\n", argv[0]);
-        return 1;
-    }
+    if (argc < 2) fatal("uso: analizador <fichero.d>");
 
     // Inicializacion de la tabla de simbolos e impresion con palabras reservadas
     inicializar_TS();

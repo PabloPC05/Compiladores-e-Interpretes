@@ -4,6 +4,9 @@
 /* Tamaño de cada mitad del doble buffer */
 #define TAM_BUFFER 1024
 
+/* Longitud maxima de un lexema */
+#define TAM_MAX_LEXEMA 512
+
 /* Tokens especiales */
 #define TOKEN_INVALIDO  -1
 #define TOKEN_EOF       256

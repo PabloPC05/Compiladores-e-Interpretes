@@ -9,220 +9,237 @@
 #include "errores.h"
 #include "definiciones.h"
 
-#define MAX_LONGITUD_ID TAM_BUFFER
-
-typedef struct {
-    int linea;
-    int columna;
-} AnalizadorLexico;
-
-static AnalizadorLexico al = { .linea = 1, .columna = 1 };
-
-static inline char leer_char(void) {
-    char c = sig_caracter();
-    if (c == '\n') { 
-        al.linea++; 
-        al.columna = 1; 
-    } else { al.columna++; }
-    return c;
+// Verifica si el caracter actual coincide con el esperado
+static inline int match(int esperado) {
+    int c = sig_caracter();
+    if (c == esperado) return 1;
+    if (c != EOF) devolver_caracter();
+    return 0;
 }
 
-static inline void devolver_char(void) {
-    devolver_caracter();
-    if (al.columna > 1) al.columna--;
-}
-
-static inline int match(char esperado) {
-    char c = leer_char();
-    if (c != esperado) {
-        devolver_char();
-        return 0;
-    }
-    return 1;
-}
-
-// Comentario de linea: // ... \n */
+// Comentario de linea: // ... \n
 static void saltar_comentario_linea(void) {
-    char c;
+    int c;
     do {
-        c = leer_char();
-    } while (c != '\n' && c != (char)EOF);
+        c = sig_caracter();
+    } while (c != '\n' && c != EOF);
 }
 
-// Comentario de bloque: /* ... */
+// Comentario de bloque /* ... */
 static void saltar_comentario_bloque(void) {
-    char c, prev = 0;
+    int c;
     do {
-        c = leer_char();
-        if (c == (char)EOF) {
-            report(ERR_EOF_COMENTARIO_BLQ, al.linea, al.columna, 0);
-            return;
-        }
-        if (prev == '*' && c == '/') return;
-        prev = c;
-    } while (c != (char)EOF);
+        c = sig_caracter();
+        // Consumimos caracteres hasta encontrar la secuencia de cierre "*/". Si encontramos EOF antes, reportamos error
+    } while (c != EOF && !(c == '*' && match('/')));
+    if (c == EOF)
+        report(obtener_linea(), obtener_columna(), ERR_EOF_COMENTARIO_BLQ);
 }
 
 // Comentario anidado: /+ ... +/ 
 static void saltar_comentario_anidado(void) {
-    int  depth = 1;
-    char c, prev = 0;
-    while (depth > 0) {
-        c = leer_char();
-        if (c == (char)EOF) {
-            report(ERR_EOF_COMENTARIO_ANID, al.linea, al.columna, 0);
+    int depth = 1; // Profundidad de anidamiento
+    int c; // Caracter actual
+    while (depth > 0) { // Mientras haya comentarios abiertos
+        c = sig_caracter(); // Leemos el siguiente caracter
+        if (c == EOF) { // Si llegamos al final del archivo antes de cerrar todos los comentarios, reportamos error
+            report(obtener_linea(), obtener_columna(), ERR_EOF_COMENTARIO_ANID);
             return;
         }
-        if (prev == '/' && c == '+') { depth++; c = 0; }
-        else if (prev == '+' && c == '/') { depth--; c = 0; }
-        prev = c;
+        // Si encontramos el inicio de un nuevo comentario anidado, incrementamos la profundidad
+        if (c == '/' && match('+'))      depth++;
+        // Si encontramos el final de un comentario, decrementamos la profundidad
+        else if (c == '+' && match('/')) depth--;
     }
 }
 
 static void saltar_espacios_y_comentarios(void) {
-    int saltando_ruido = 1;
+    int saltando_ruido = 1; 
 
+    // Mientras sigamos encontrando espacios o comentarios, seguimos saltando
     while (saltando_ruido) {
-        char c = leer_char();
+        // Actualizamos el bloque de inicio al bloque activo y colocamos el puntero de inicio en la posición del puntero de delantero para que el lexema que se forme a continuación sea correcto incluso si hemos tenido que cambiar de bloque
+        mover_inicio();
+        int c = sig_caracter();
 
-        if (isspace((unsigned char)c)) {
-            continue;
-        }
+        // Si el caracter es un espacio seguimos saltando
+        if (isspace(c)) continue;
 
+        // Si estamos ante un posible comentario
         if (c == '/') {
-            char sig = leer_char();
+            // Pedimos el siguiente caracter
+            int sig = sig_caracter();
 
-            if (sig == '/') { saltar_comentario_linea();   }
+            // Determinamos el tipo de caracter posible 
+            if (sig == '/')      { saltar_comentario_linea();   }
             else if (sig == '*') { saltar_comentario_bloque();  }
             else if (sig == '+') { saltar_comentario_anidado(); }
+
+            // Si no es ninguno de los tipos de comentarios posibles
             else {
-                devolver_char();
-                devolver_char();
+                // Si el siguiente caracter no es EOF, lo devolvemos para que pueda ser procesado como parte de otro token
+                if (sig != EOF) devolver_caracter();
+                devolver_caracter();
+
+                // No estamos ante un comentario, por lo que dejamos de saltar
                 saltando_ruido = 0;
             }
         } else {
-            if (c != (char)EOF) devolver_char();
+            // Si tampoco había espacios que saltar ni comentarios, devolvemos el caracter para que pueda ser procesado como parte de otro token y dejamos de saltar
+            if (c != EOF) devolver_caracter();
             saltando_ruido = 0;
         }
     }
 }
 
+// Lee un identificador o palabra reservada
 static ComponenteLexico leer_identificador(void) {
     int longitud = 1;
-    int col_inicio = al.columna - 1;
+    int col_inicio = obtener_columna();
 
-    char c = leer_char();
-    while (isalnum((unsigned char)c) || c == '_') {
+    int c = sig_caracter();
+    while (isalnum(c) || c == '_') {
         longitud++;
-        c = leer_char();
+        c = sig_caracter();
     }
-    devolver_char();
+    // Si el caracter que ha detenido la lectura no es EOF, lo devolvemos para que pueda ser procesado como parte de otro token
+    if (c != EOF) devolver_caracter();
 
-    if (longitud > MAX_LONGITUD_ID) {
-        report(ERR_ID_DEMASIADO_LARGO, al.linea, col_inicio, 0);
+    // Si el identificador supera el límite de longitud, reportamos error pero seguimos procesándolo para no perder más errores posibles 
+    if (longitud > TAM_MAX_LEXEMA) {
+        report(obtener_linea(), col_inicio, ERR_ID_DEMASIADO_LARGO);
     }
 
+    // Buscamos el lexema en la tabla de símbolos. Si no está, se insertará con token IDENTIFICADOR. Devolvemos el componente léxico resultante
     char *lex = get_lexema();
     ComponenteLexico cl = buscar_o_insertar_TS(lex, IDENTIFICADOR);
     return make_cl(cl.token, lex);
 }
 
 
-// Consume digitos hexadecimales con separador '_' 
-static inline void consumir_hex(void) {
-    char c = leer_char();
-    while (isxdigit((unsigned char)c) || c == '_') c = leer_char();
-    devolver_char();
+// Consume digitos hexadecimales con separador '_'. Devuelve num de digitos reales.
+static inline int consumir_hex(void) {
+    int n = 0;
+    int c = sig_caracter();
+    while (isxdigit(c) || c == '_') {
+        if (isxdigit(c)) n++;
+        c = sig_caracter();
+    }
+    if (c != EOF) devolver_caracter();
+    return n;
 }
 
-// Consume digitos binarios con separador '_' 
-static inline void consumir_bin(void) {
-    char c = leer_char();
-    while (c == '0' || c == '1' || c == '_') c = leer_char();
-    devolver_char();
+// Consume digitos binarios con separador '_'. Devuelve num de digitos reales.
+static inline int consumir_bin(void) {
+    int n = 0;
+    int c = sig_caracter();
+    while (c == '0' || c == '1' || c == '_') {
+        if (c != '_') n++;
+        c = sig_caracter();
+    }
+    if (c != EOF) devolver_caracter();
+    return n;
 }
 
 // Consume digitos decimales con separador '_' 
 static inline void consumir_dec(void) {
-    char c = leer_char();
-    while (isdigit((unsigned char)c) || c == '_') c = leer_char();
-    devolver_char();
+    int c = sig_caracter();
+    while (isdigit(c) || c == '_') c = sig_caracter();
+    if (c != EOF) devolver_caracter();
 }
-
-
-/*static int es_binario(char c) {
-    return c == '0' || c == '1';
-}
-
-static void consumir(int (*cond)(int)) {
-    char c = leer_char();
-    while (cond((unsigned char)c) || c == '_') c = leer_char();
-}*/
 
 
 // Intenta leer parte decimal (.digitos). Devuelve 1 si la leyo
 static inline int leer_parte_decimal(void) {
-    char c = leer_char();
-    if (c != '.'){
-        devolver_char();
+    int c = sig_caracter();
+    // Si no es un punto, devolvemos el caracter para que pueda ser procesado como parte de otro token
+    if (c != '.') {
+        if (c != EOF) devolver_caracter();
         return 0;
     }
 
-    c = leer_char();
-    if (isdigit((unsigned char)c)) {
+    // Si tenemos un punto, el siguiente caracter debe ser un digito para que sea parte decimal
+    c = sig_caracter();
+    if (isdigit(c)) {
         consumir_dec();
         return 1;
     }
 
-    devolver_char();
-    devolver_char();
+    // Si el siguiente caracter no es un dígito, debemos devolver el caracter leído para que pueda ser procesado como parte de otro token
+    if (c != EOF) devolver_caracter();
+    devolver_caracter();
     return 0;
 }
 
 // Intenta leer exponente (e/E [+-] digitos). Devuelve 1 si lo leyo
 static inline int leer_exponente(void) {
-    char c = leer_char();
-    if (c != 'e' && c != 'E') { devolver_char(); return 0; }
-
-    int devueltos = 1; // contamos la 'e'/'E'
-    char sig = leer_char();
-    devueltos++;
-
-    if (sig == '+' || sig == '-') {
-        sig = leer_char();
-        devueltos++;
+    // Tomamos el siguiente caracter para ver si es 'e' o 'E'
+    int c = sig_caracter();
+    if (c != 'e' && c != 'E') {
+        // Si no lo es y no es EOF, lo devolvemos para que pueda ser procesado como parte de otro token
+        if (c != EOF) devolver_caracter();
+        return 0;
     }
 
-    if (isdigit((unsigned char)sig)) {
+    // Si tenemos 'e' o 'E', el siguiente caracter puede ser un signo opcional
+    int sig = sig_caracter();
+    // Si es un signo 
+    if (sig == '+' || sig == '-') {
+        // Si tras el signo hay digitos, consumimos el exponente y devolvemos 1
+        int siguiente = sig_caracter();
+        if (isdigit(siguiente)) {
+            consumir_dec();
+            return 1;
+        }
+        // Si no hay digitos tras el signo debemos volver a atrás para que pueda ser procesado como parte de otro token
+        if (siguiente != EOF) devolver_caracter();
+        devolver_caracter();   // retrocedemos el signo
+        devolver_caracter();   // retrocedemos la 'e' o 'E'
+        return 0;
+    }
+
+    // Si tras la 'e' o 'E' hay digitos, consumimos el exponente y devolvemos 1
+    if (isdigit(sig)) {
         consumir_dec();
         return 1;
     }
 
-    // No hay digitos tras 'e': backtrack de todo lo consumido
-    for (int i = 0; i < devueltos; i++) devolver_char();
+    // Si no hay digitos tras la 'e' o 'E', debemos devoler el caracter leído para que pueda ser procesado como parte de otro token
+    if (sig != EOF) devolver_caracter();
+    devolver_caracter();   // retrocedemos la 'e' o 'E'
     return 0;
 }
 
-static ComponenteLexico leer_numero(char primero) {
+static ComponenteLexico leer_numero(int primero) {
     int es_flotante = 0;
 
     if (primero == '0') {
-        char c = leer_char();
+        int c = sig_caracter();
 
         if (c == 'x' || c == 'X') {
-            consumir_hex();
-            //consumir(isxdigit);
+
+            // Si no han consumido dígitos hexadecimales tras el prefijo, reportamos error
+            if (consumir_hex() == 0) {
+                report(obtener_linea(), obtener_columna(), ERR_HEX_SIN_DIGITOS);
+                return make_cl(TOKEN_ERROR, get_lexema());
+            }
             return make_cl(LIT_ENTERO, get_lexema());
+            
         } else if (c == 'b' || c == 'B') {
-            consumir_bin();
-            //consumir(es_binario);
+
+            // Si no se ha consumido ningun digito binario tras el prefijo, reportamos error
+            if (consumir_bin() == 0) {
+                report(obtener_linea(), obtener_columna(), ERR_BIN_SIN_DIGITOS);
+                return make_cl(TOKEN_ERROR, get_lexema());
+            }
             return make_cl(LIT_ENTERO, get_lexema());
         }
+
+        if (c != EOF) devolver_caracter();
     }
-    
-    // Si no es un literal hexadecimal o binario, puede ser decimal o flotante
-    devolver_char();
-    //consumir(isdigit);
+
+    // Decimal o flotante: devolver primero para que consumir_dec lo relea
+    devolver_caracter();
     consumir_dec();
 
     if (leer_parte_decimal()) es_flotante = 1;
@@ -234,25 +251,30 @@ static ComponenteLexico leer_numero(char primero) {
     return make_cl(LIT_ENTERO, get_lexema());
 }
 
-
+// Autómata para leer cadenas de caracteres (strings)
 static ComponenteLexico leer_string(void) {
-    char c = leer_char();
+    int c = sig_caracter();
 
-    while (c != '"' && c != (char)EOF) {
+    while (c != '"' && c != EOF) {
         if (c == '\\') {
-            char esc = leer_char();
+            int esc = sig_caracter();
             if (esc != 'n' && esc != 't' && esc != 'r' && esc != '\\' && esc != '"') {
-                report(ERR_ESCAPE_DESCONOCIDO, al.linea, al.columna, 0);
+                report(obtener_linea(), obtener_columna(), ERR_ESCAPE_DESCONOCIDO);
             }
         }
-        c = leer_char();
+        c = sig_caracter();
+    }
+
+    if (c == EOF) {
+        report(obtener_linea(), obtener_columna(), ERR_STR_SIN_CERRAR);
+        return make_cl(TOKEN_ERROR, get_lexema());
     }
 
     return make_cl(LIT_STRING, get_lexema());
 }
 
 
-static ComponenteLexico procesar_operador_o_delimitador(char c) {
+static ComponenteLexico procesar_operador_o_delimitador(int c) {
     switch (c) {
     case '/': return make_cl(match('=') ? OP_DIV_ASSIGN : '/',  get_lexema());
     case '=': return make_cl(match('=') ? OP_EQ  : '=',        get_lexema());
@@ -291,7 +313,7 @@ static ComponenteLexico procesar_operador_o_delimitador(char c) {
         return make_cl(c, get_lexema());
 
     default:
-        report(ERR_CARACTER_NO_RECONOC, al.linea, al.columna, 0);
+        report(obtener_linea(), obtener_columna(), ERR_CARACTER_NO_RECONOC);
         return make_cl(TOKEN_ERROR, get_lexema());
     }
 }
@@ -301,19 +323,24 @@ ComponenteLexico sig_comp_lexico(void) {
     saltar_espacios_y_comentarios();
 
     mover_inicio();
-    char c = leer_char();
+    int c = sig_caracter();
 
-    if (c == (char)EOF)
+    if (c == EOF)
         return make_cl(TOKEN_EOF, get_lexema());
 
-    if (isalpha((unsigned char)c) || c == '_')
+    if (isalpha(c) || c == '_')
         return leer_identificador();
 
-    if (isdigit((unsigned char)c))
+    if (isdigit(c))
         return leer_numero(c);
 
     if (c == '"')
         return leer_string();
 
     return procesar_operador_o_delimitador(c);
+}
+
+void liberar_comp_lexico(ComponenteLexico *cl) {
+    free(cl->lexema);
+    cl->lexema = NULL;
 }

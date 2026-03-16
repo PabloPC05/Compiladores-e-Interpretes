@@ -19,7 +19,7 @@ void analizar(void) {
         printf("<%-4d, %s>\n", cl.token, cl.lexema);
         num_componentes++;
 
-        free(cl.lexema);
+        liberar_comp_lexico(&cl);
     } while (cl.token != TOKEN_EOF);
 
     printf("\nTotal de componentes lexicos: %d\n", num_componentes);

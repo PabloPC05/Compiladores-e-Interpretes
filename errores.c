@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include "errores.h"
 
-void report(const char *msg, int linea, int columna, int fatal) {
-    if (linea > 0)
-        fprintf(stderr, "Error [%d:%d]: %s\n", linea, columna, msg);
-    else
-        fprintf(stderr, "Error: %s\n", msg);
+void report(int linea, int columna, const char *msg) {
+    fprintf(stderr, "Error lexico [%d:%d]: %s\n", linea, columna, msg);
+}
 
-    if (fatal) exit(1);
+void fatal(const char *msg) {
+    fprintf(stderr, "Error fatal: %s\n", msg);
+    exit(EXIT_FAILURE);
 }
