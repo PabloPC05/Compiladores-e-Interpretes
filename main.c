@@ -1,30 +1,30 @@
 #include <stdio.h>
 
-#include "definiciones.h"
-#include "TS.h"
-#include "AS.h"
-#include "errores.h"
+#include "definitions.h"
+#include "symbol_table.h"
+#include "analyzer.h"
+#include "errors.h"
 
 int main(int argc, char *argv[]) {
     if (argc < 2) fatal("uso: analizador <fichero.d>");
 
     // Inicializacion de la tabla de simbolos e impresion con palabras reservadas
-    inicializar_TS();
+    initSymbolTable();
     printf("=== Tabla de simbolos inicial (palabras reservadas) ===\n");
-    imprimir_TS();
+    printSymbolTable();
     printf("\n");
 
     // Inicializacion y ejecucion del analizador sintactico
-    inicializar_AS(argv[1]);
+    initAnalyzer(argv[1]);
     printf("=== Analisis ===\n");
-    analizar();
+    analyze();
     printf("\n");
 
     // Impresion final de la tabla de simbolos y limpieza
     printf("=== Tabla de simbolos final ===\n");
-    imprimir_TS();
-    liberar_TS();
-    cerrar_AS();
+    printSymbolTable();
+    freeSymbolTable();
+    closeAnalyzer();
 
     return 0;
 }
